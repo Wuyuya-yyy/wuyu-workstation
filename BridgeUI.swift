@@ -58,6 +58,7 @@ final class WorkstationModel: ObservableObject {
     var onRaiseStageBar: (() -> Void)?
     var onStageBarEdgeChanged: ((StageBarEdge) -> Void)?
     var onDockGeometryChanged: (() -> Void)?
+    var onToggleDockSizeHud: (() -> Void)?
     var onUpdateBadge: ((Int) -> Void)?
     var activeScreenProvider: (() -> NSScreen?)?
 
@@ -357,6 +358,39 @@ final class WorkstationModel: ObservableObject {
         sheet = .settings
     }
 
+    func setDockVerticalWidth(_ width: CGFloat) {
+        let clamped = min(StageBarMetrics.verticalWidthRange.upperBound, max(StageBarMetrics.verticalWidthRange.lowerBound, round(width)))
+        UserDefaults.standard.set(Double(clamped), forKey: StageBarMetrics.verticalWidthKey)
+        stageManager.updateMetrics(for: activeScreen)
+        onDockGeometryChanged?()
+    }
+
+    func setDockVerticalLengthPercent(_ pct: CGFloat) {
+        let clamped = min(StageBarMetrics.verticalLengthPercentRange.upperBound, max(StageBarMetrics.verticalLengthPercentRange.lowerBound, round(pct)))
+        UserDefaults.standard.set(Double(clamped), forKey: StageBarMetrics.verticalLengthPercentKey)
+        stageManager.updateMetrics(for: activeScreen)
+        onDockGeometryChanged?()
+    }
+
+    func setDockHorizontalHeight(_ height: CGFloat) {
+        let clamped = min(StageBarMetrics.horizontalHeightRange.upperBound, max(StageBarMetrics.horizontalHeightRange.lowerBound, round(height)))
+        UserDefaults.standard.set(Double(clamped), forKey: StageBarMetrics.horizontalHeightKey)
+        stageManager.updateMetrics(for: activeScreen)
+        onDockGeometryChanged?()
+    }
+
+    func setDockHorizontalLengthPercent(_ pct: CGFloat) {
+        let clamped = min(StageBarMetrics.horizontalLengthPercentRange.upperBound, max(StageBarMetrics.horizontalLengthPercentRange.lowerBound, round(pct)))
+        UserDefaults.standard.set(Double(clamped), forKey: StageBarMetrics.horizontalLengthPercentKey)
+        stageManager.updateMetrics(for: activeScreen)
+        onDockGeometryChanged?()
+    }
+
+    func resetDockDimensions() {
+        stageManager.resetBarDimensions(on: activeScreen)
+        onDockGeometryChanged?()
+    }
+
     func copy(_ text: String) -> Bool {
         NSPasteboard.general.clearContents()
         guard NSPasteboard.general.setString(text, forType: .string) else {
@@ -578,7 +612,7 @@ private struct StageBarView: View {
     private func verticalRail(width: CGFloat, height: CGFloat) -> some View {
         let isWide = width >= 112
         let scale = min(1.30, max(0.82, width / 74.0))
-        let innerW = max(42, floor(width - 14))
+        let innerW = max(40, floor(width - 16))
         let tileH = isWide ? max(36, round(38 * min(1.15, scale))) : max(40, round(46 * scale))
         let utilH = isWide ? 30.0 : max(28, round(30 * scale))
         let iconSz = isWide ? 14.0 : max(12.5, round(15 * scale))
@@ -731,7 +765,7 @@ private struct StageBarView: View {
             }
         }
         .padding(.vertical, 10)
-        .padding(.horizontal, 7)
+        .padding(.horizontal, 8)
     }
 
     // MARK: Shared Interactive Controls
@@ -973,7 +1007,35 @@ private struct StageBarView: View {
                 }
             }
             Divider()
-            Button("自由调整宽高（也可直接拖边缩放）…") { model.openSettings() }
+            Button("悬浮滑块微调宽/长（无需打开主窗口）…") {
+                model.onToggleDockSizeHud?()
+            }
+            if isVertical {
+                Menu("快速调整宽度") {
+                    Button("紧凑窄栏（66 px）") { model.setDockVerticalWidth(66) }
+                    Button("默认图标栏（80 px）") { model.setDockVerticalWidth(80) }
+                    Button("宽侧边栏（132 px · 显示完整名称）") { model.setDockVerticalWidth(132) }
+                    Button("特宽侧边栏（166 px）") { model.setDockVerticalWidth(166) }
+                }
+                Menu("快速调整长度") {
+                    Button("短栏（58%）") { model.setDockVerticalLengthPercent(58) }
+                    Button("适中（76%）") { model.setDockVerticalLengthPercent(76) }
+                    Button("长栏（90%）") { model.setDockVerticalLengthPercent(90) }
+                    Button("贴满全高（100%）") { model.setDockVerticalLengthPercent(100) }
+                }
+            } else {
+                Menu("快速调整高度") {
+                    Button("紧凑（42 px）") { model.setDockHorizontalHeight(42) }
+                    Button("标准（48 px）") { model.setDockHorizontalHeight(48) }
+                    Button("舒适（58 px）") { model.setDockHorizontalHeight(58) }
+                }
+                Menu("快速调整长度") {
+                    Button("居中短栏（75%）") { model.setDockHorizontalLengthPercent(75) }
+                    Button("标准（90%）") { model.setDockHorizontalLengthPercent(90) }
+                    Button("贴满全宽（98%）") { model.setDockHorizontalLengthPercent(98) }
+                }
+            }
+            Button("重置为默认尺寸") { model.resetDockDimensions() }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: model.stageBarEdge.symbolName).font(.system(size: iconSize, weight: .medium))
@@ -988,7 +1050,7 @@ private struct StageBarView: View {
         .frame(width: width, height: height)
         .background(palette.surface.opacity(0.68), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(palette.line.opacity(0.7)) }
-        .help("切换停靠方向（顶部 / 底部 / 左侧 / 右侧）· 直接拖边缘即可调整宽/长")
+        .help("切换停靠方向或调节宽高 · 隐藏主窗口时也可直接拖边缘缩放")
     }
 
     private func toggleMainWindowIconButton(size: CGFloat) -> some View {
@@ -1787,11 +1849,442 @@ private struct BridgeView: View {
     }
 }
 
-// MARK: - Floating Panel Subclass & Application Coordinator
+// MARK: - Floating Panel Subclass, Always-Active Edge Resizer, Mini Size HUD & Coordinator
 
 private final class StageBarPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+private struct ResizeEdgeMask: OptionSet, Equatable {
+    let rawValue: Int
+    static let left = ResizeEdgeMask(rawValue: 1 << 0)
+    static let right = ResizeEdgeMask(rawValue: 1 << 1)
+    static let top = ResizeEdgeMask(rawValue: 1 << 2)
+    static let bottom = ResizeEdgeMask(rawValue: 1 << 3)
+}
+
+@MainActor
+private final class StageBarEdgeResizeOverlay: NSView {
+    var edgeProvider: (() -> StageBarEdge)?
+    var accentColorProvider: (() -> NSColor)?
+    var onResizeBegan: (() -> Void)?
+    var onResizeChanged: ((CGRect) -> Void)?
+    var onResizeEnded: ((CGRect) -> Void)?
+
+    private var trackingArea: NSTrackingArea?
+    private var hoveredMask: ResizeEdgeMask = []
+    private var dragMask: ResizeEdgeMask = []
+    private var isDragging = false
+    private var dragStartMouse: NSPoint = .zero
+    private var dragStartFrame: CGRect = .zero
+    private var dragVisibleFrame: CGRect = .zero
+    private var dragDockEdge: StageBarEdge = .top
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden else { return nil }
+        let local = convert(point, from: superview)
+        guard bounds.contains(local) else { return nil }
+        return resizeMask(at: local).isEmpty ? nil : self
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard !isDragging else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        updateHover(mask: resizeMask(at: local))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard !isDragging else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        updateHover(mask: resizeMask(at: local))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard !isDragging else { return }
+        updateHover(mask: [])
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let win = window else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        let mask = resizeMask(at: local)
+        guard !mask.isEmpty else { return }
+
+        isDragging = true
+        dragMask = mask
+        dragStartMouse = NSEvent.mouseLocation
+        dragStartFrame = win.frame
+        dragDockEdge = edgeProvider?() ?? .top
+        dragVisibleFrame = (win.screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+            ?? CGRect(x: 0, y: 0, width: 1920, height: 1050)
+        applyCursor(for: mask)
+        needsDisplay = true
+        onResizeBegan?()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDragging, let win = window else { return }
+        let now = NSEvent.mouseLocation
+        let dx = now.x - dragStartMouse.x
+        let dy = now.y - dragStartMouse.y
+        let visible = dragVisibleFrame
+        let m = WindowStageManager.barMargin
+        let maxW = max(720, visible.width - m * 2)
+        let maxH = max(420, visible.height - m * 2)
+
+        var newW = dragStartFrame.width
+        var newH = dragStartFrame.height
+        var newX = dragStartFrame.origin.x
+        var newY = dragStartFrame.origin.y
+
+        if dragDockEdge.isVertical {
+            if dragMask.contains(.left) && dragDockEdge == .right {
+                newW = clamp(dragStartFrame.width - dx, StageBarMetrics.verticalWidthRange)
+            } else if dragMask.contains(.right) && dragDockEdge == .left {
+                newW = clamp(dragStartFrame.width + dx, StageBarMetrics.verticalWidthRange)
+            }
+            newX = dragDockEdge == .right ? (visible.maxX - newW - m) : (visible.minX + m)
+
+            let minH = max(400, floor(maxH * (StageBarMetrics.verticalLengthPercentRange.lowerBound / 100.0)))
+            if dragMask.contains(.top) {
+                newH = clamp(dragStartFrame.height + dy * 2, minH...maxH)
+            } else if dragMask.contains(.bottom) {
+                newH = clamp(dragStartFrame.height - dy * 2, minH...maxH)
+            }
+            newY = floor(visible.midY - newH / 2)
+        } else {
+            if dragMask.contains(.bottom) && dragDockEdge == .top {
+                newH = clamp(dragStartFrame.height - dy, StageBarMetrics.horizontalHeightRange)
+            } else if dragMask.contains(.top) && dragDockEdge == .bottom {
+                newH = clamp(dragStartFrame.height + dy, StageBarMetrics.horizontalHeightRange)
+            }
+            newY = dragDockEdge == .top ? (visible.maxY - newH - m) : (visible.minY + m)
+
+            let minW = max(720, floor(maxW * (StageBarMetrics.horizontalLengthPercentRange.lowerBound / 100.0)))
+            if dragMask.contains(.right) {
+                newW = clamp(dragStartFrame.width + dx * 2, minW...maxW)
+            } else if dragMask.contains(.left) {
+                newW = clamp(dragStartFrame.width - dx * 2, minW...maxW)
+            }
+            newX = floor(visible.midX - newW / 2)
+        }
+
+        let targetFrame = CGRect(x: round(newX), y: round(newY), width: round(newW), height: round(newH))
+        win.setFrame(targetFrame, display: true)
+        applyCursor(for: dragMask)
+        onResizeChanged?(targetFrame)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDragging, let win = window else { return }
+        isDragging = false
+        let finalFrame = win.frame
+        dragMask = []
+        let local = convert(event.locationInWindow, from: nil)
+        let stillOver = bounds.contains(local) ? resizeMask(at: local) : []
+        hoveredMask = stillOver
+        if stillOver.isEmpty {
+            NSCursor.arrow.set()
+        } else {
+            applyCursor(for: stillOver)
+        }
+        needsDisplay = true
+        onResizeEnded?(finalFrame)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let mask = isDragging ? dragMask : hoveredMask
+        guard !mask.isEmpty else { return }
+        let base = accentColorProvider?() ?? NSColor.controlAccentColor
+        base.withAlphaComponent(isDragging ? 0.92 : 0.68).setFill()
+
+        if mask.contains(.left) {
+            let h = min(44, max(20, bounds.height * 0.22))
+            let rect = NSRect(x: 2.0, y: bounds.midY - h / 2, width: 3.0, height: h)
+            NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+        if mask.contains(.right) {
+            let h = min(44, max(20, bounds.height * 0.22))
+            let rect = NSRect(x: bounds.width - 5.0, y: bounds.midY - h / 2, width: 3.0, height: h)
+            NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+        if mask.contains(.top) {
+            let w = min(44, max(20, bounds.width * 0.36))
+            let rect = NSRect(x: bounds.midX - w / 2, y: bounds.height - 5.0, width: w, height: 3.0)
+            NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+        if mask.contains(.bottom) {
+            let w = min(44, max(20, bounds.width * 0.36))
+            let rect = NSRect(x: bounds.midX - w / 2, y: 2.0, width: w, height: 3.0)
+            NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+    }
+
+    private func resizeMask(at p: NSPoint) -> ResizeEdgeMask {
+        let dockEdge = edgeProvider?() ?? .top
+        let xBand: CGFloat = dockEdge.isVertical ? 7.5 : 9.0
+        let yBand: CGFloat = dockEdge.isVertical ? 9.0 : 6.0
+        let cornerBand: CGFloat = 15.0
+
+        var mask: ResizeEdgeMask = []
+        switch dockEdge {
+        case .right:
+            let onLeft = p.x <= xBand
+            let onTop = p.y >= bounds.height - yBand
+            let onBottom = p.y <= yBand
+            if onLeft { mask.insert(.left) }
+            if onTop { mask.insert(.top) }
+            if onBottom { mask.insert(.bottom) }
+            if !mask.isEmpty {
+                if p.x <= cornerBand && (onTop || onBottom) { mask.insert(.left) }
+                if onLeft && p.y >= bounds.height - cornerBand { mask.insert(.top) }
+                if onLeft && p.y <= cornerBand { mask.insert(.bottom) }
+            }
+        case .left:
+            let onRight = p.x >= bounds.width - xBand
+            let onTop = p.y >= bounds.height - yBand
+            let onBottom = p.y <= yBand
+            if onRight { mask.insert(.right) }
+            if onTop { mask.insert(.top) }
+            if onBottom { mask.insert(.bottom) }
+            if !mask.isEmpty {
+                if p.x >= bounds.width - cornerBand && (onTop || onBottom) { mask.insert(.right) }
+                if onRight && p.y >= bounds.height - cornerBand { mask.insert(.top) }
+                if onRight && p.y <= cornerBand { mask.insert(.bottom) }
+            }
+        case .top:
+            let onBottom = p.y <= yBand
+            let onLeft = p.x <= xBand
+            let onRight = p.x >= bounds.width - xBand
+            if onBottom { mask.insert(.bottom) }
+            if onLeft { mask.insert(.left) }
+            if onRight { mask.insert(.right) }
+            if !mask.isEmpty {
+                if p.y <= cornerBand && (onLeft || onRight) { mask.insert(.bottom) }
+                if onBottom && p.x <= cornerBand { mask.insert(.left) }
+                if onBottom && p.x >= bounds.width - cornerBand { mask.insert(.right) }
+            }
+        case .bottom:
+            let onTop = p.y >= bounds.height - yBand
+            let onLeft = p.x <= xBand
+            let onRight = p.x >= bounds.width - xBand
+            if onTop { mask.insert(.top) }
+            if onLeft { mask.insert(.left) }
+            if onRight { mask.insert(.right) }
+            if !mask.isEmpty {
+                if p.y >= bounds.height - cornerBand && (onLeft || onRight) { mask.insert(.top) }
+                if onTop && p.x <= cornerBand { mask.insert(.left) }
+                if onTop && p.x >= bounds.width - cornerBand { mask.insert(.right) }
+            }
+        }
+        return mask
+    }
+
+    private func updateHover(mask: ResizeEdgeMask) {
+        guard mask != hoveredMask else {
+            if !mask.isEmpty { applyCursor(for: mask) }
+            return
+        }
+        let wasActive = !hoveredMask.isEmpty
+        hoveredMask = mask
+        if mask.isEmpty {
+            if wasActive { NSCursor.arrow.set() }
+        } else {
+            applyCursor(for: mask)
+        }
+        needsDisplay = true
+    }
+
+    private func applyCursor(for mask: ResizeEdgeMask) {
+        if #available(macOS 15.0, *) {
+            if mask == [.top, .left] {
+                NSCursor.frameResize(position: .topLeft, directions: .all).set()
+                return
+            }
+            if mask == [.top, .right] {
+                NSCursor.frameResize(position: .topRight, directions: .all).set()
+                return
+            }
+            if mask == [.bottom, .left] {
+                NSCursor.frameResize(position: .bottomLeft, directions: .all).set()
+                return
+            }
+            if mask == [.bottom, .right] {
+                NSCursor.frameResize(position: .bottomRight, directions: .all).set()
+                return
+            }
+        }
+        let hasH = mask.contains(.left) || mask.contains(.right)
+        let hasV = mask.contains(.top) || mask.contains(.bottom)
+        if hasH && !hasV {
+            NSCursor.resizeLeftRight.set()
+        } else if hasV && !hasH {
+            NSCursor.resizeUpDown.set()
+        } else if hasH {
+            NSCursor.resizeLeftRight.set()
+        }
+    }
+
+    private func clamp(_ value: CGFloat, _ range: ClosedRange<CGFloat>) -> CGFloat {
+        min(range.upperBound, max(range.lowerBound, value))
+    }
+}
+
+private struct DockSizeHudView: View {
+    @ObservedObject var model: WorkstationModel
+    @ObservedObject var stage: WindowStageManager
+    @ObservedObject var themeStore: WorkstationThemeStore
+    let onClose: () -> Void
+    @Environment(\.colorScheme) private var scheme
+
+    private var palette: WorkstationPalette { themeStore.palette(for: scheme) }
+    private var isVertical: Bool { model.stageBarEdge.isVertical }
+
+    private var verticalWidthBinding: Binding<Double> {
+        Binding(
+            get: { Double(stage.barMetrics.verticalWidth) },
+            set: { model.setDockVerticalWidth(CGFloat($0)) }
+        )
+    }
+
+    private var verticalLengthBinding: Binding<Double> {
+        Binding(
+            get: { Double(StageBarMetrics.savedVerticalLengthPercent()) },
+            set: { model.setDockVerticalLengthPercent(CGFloat($0)) }
+        )
+    }
+
+    private var horizontalHeightBinding: Binding<Double> {
+        Binding(
+            get: { Double(stage.barMetrics.horizontalHeight) },
+            set: { model.setDockHorizontalHeight(CGFloat($0)) }
+        )
+    }
+
+    private var horizontalLengthBinding: Binding<Double> {
+        Binding(
+            get: { Double(StageBarMetrics.savedHorizontalLengthPercent()) },
+            set: { model.setDockHorizontalLengthPercent(CGFloat($0)) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("调节悬浮栏尺寸", systemImage: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(palette.ink)
+                Spacer()
+                Button("重置") { model.resetDockDimensions() }
+                    .buttonStyle(WorkstationButtonStyle(.quiet, compact: true))
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(palette.muted)
+                        .frame(width: 22, height: 22)
+                        .background(palette.surface, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 5) {
+                ForEach(StageBarEdge.allCases) { edge in
+                    let active = model.stageBarEdge == edge
+                    Button { model.stageBarEdge = edge } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: edge.symbolName).font(.system(size: 10.5))
+                            Text(edge.label).font(.system(size: 11, weight: active ? .semibold : .medium))
+                        }
+                        .foregroundStyle(active ? palette.accentText : palette.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5.5)
+                        .background(active ? palette.accent : palette.surface, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if isVertical {
+                hudSliderRow(
+                    title: "左右栏宽度",
+                    valueText: "\(Int(round(stage.barMetrics.verticalWidth))) px",
+                    value: verticalWidthBinding,
+                    range: Double(StageBarMetrics.verticalWidthRange.lowerBound)...Double(StageBarMetrics.verticalWidthRange.upperBound)
+                )
+                hudSliderRow(
+                    title: "左右栏长度",
+                    valueText: "\(Int(round(StageBarMetrics.savedVerticalLengthPercent())))%",
+                    value: verticalLengthBinding,
+                    range: Double(StageBarMetrics.verticalLengthPercentRange.lowerBound)...Double(StageBarMetrics.verticalLengthPercentRange.upperBound)
+                )
+            } else {
+                hudSliderRow(
+                    title: "上下栏高度",
+                    valueText: "\(Int(round(stage.barMetrics.horizontalHeight))) px",
+                    value: horizontalHeightBinding,
+                    range: Double(StageBarMetrics.horizontalHeightRange.lowerBound)...Double(StageBarMetrics.horizontalHeightRange.upperBound)
+                )
+                hudSliderRow(
+                    title: "上下栏长度",
+                    valueText: "\(Int(round(StageBarMetrics.savedHorizontalLengthPercent())))%",
+                    value: horizontalLengthBinding,
+                    range: Double(StageBarMetrics.horizontalLengthPercentRange.lowerBound)...Double(StageBarMetrics.horizontalLengthPercentRange.upperBound)
+                )
+            }
+
+            Text("提示：隐藏主窗口时，也可直接把鼠标移到悬浮栏内侧或两端边缘拖拽缩放。")
+                .font(.system(size: 10.5))
+                .foregroundStyle(palette.quiet)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 280)
+        .background {
+            ZStack {
+                VisualEffectGlass(material: .hudWindow, blendingMode: .behindWindow)
+                palette.sidebar.opacity(0.84)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(palette.line, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .environment(\.workstationPalette, palette)
+    }
+
+    private func hudSliderRow(title: String, valueText: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title).font(.system(size: 11.5, weight: .medium)).foregroundStyle(palette.ink)
+                Spacer()
+                Text(valueText).font(.system(size: 11, design: .monospaced)).foregroundStyle(palette.accent)
+            }
+            Slider(value: value, in: range, step: 1)
+                .tint(palette.accent)
+        }
+    }
 }
 
 @MainActor
@@ -1799,6 +2292,7 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
     let model: WorkstationModel
     var mainWindow: NSWindow!
     var stageBarPanel: StageBarPanel!
+    var dockSizeHudPanel: StageBarPanel?
     var statusItem: NSStatusItem!
     private var isProgrammaticBarMove = false
     private var edgeSnapTask: Task<Void, Never>?
@@ -1821,6 +2315,7 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
         model.onRaiseStageBar = { [weak self] in self?.raiseStageBar() }
         model.onStageBarEdgeChanged = { [weak self] edge in self?.animateStageBar(to: edge) }
         model.onDockGeometryChanged = { [weak self] in self?.applyLiveDockGeometry() }
+        model.onToggleDockSizeHud = { [weak self] in self?.toggleDockSizeHud() }
         model.onUpdateBadge = { [weak self] count in self?.updateStatusItemTitle(count: count) }
         model.activeScreenProvider = { [weak self] in self?.currentTargetScreen }
 
@@ -1877,11 +2372,15 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
         let frame = model.stageManager.stageBarFrame(edge: model.stageBarEdge)
         let panel = StageBarPanel(
             contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel, .resizable],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.worksWhenModal = true
+        panel.acceptsMouseMovedEvents = true
         panel.level = .floating
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -1889,9 +2388,115 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = true
         panel.delegate = self
-        panel.contentView = NSHostingView(rootView: StageBarView(model: model, stage: model.stageManager, themeStore: model.themeStore))
+
+        let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        container.autoresizingMask = [.width, .height]
+
+        let hostingView = NSHostingView(rootView: StageBarView(model: model, stage: model.stageManager, themeStore: model.themeStore))
+        hostingView.frame = container.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        container.addSubview(hostingView)
+
+        let resizeOverlay = StageBarEdgeResizeOverlay(frame: container.bounds)
+        resizeOverlay.autoresizingMask = [.width, .height]
+        resizeOverlay.edgeProvider = { [weak self] in self?.model.stageBarEdge ?? .top }
+        resizeOverlay.accentColorProvider = { [weak self] in
+            guard let self else { return NSColor.controlAccentColor }
+            let isDark = (self.stageBarPanel?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) ?? .darkAqua) == .darkAqua
+            let rgb = self.model.themeStore.effectiveRGB(for: isDark ? .dark : .light).accent
+            return NSColor(calibratedRed: rgb.r, green: rgb.g, blue: rgb.b, alpha: 1)
+        }
+        resizeOverlay.onResizeBegan = { [weak self] in
+            guard let self else { return }
+            self.edgeSnapTask?.cancel()
+            self.isProgrammaticBarMove = true
+        }
+        resizeOverlay.onResizeChanged = { [weak self] liveFrame in
+            guard let self else { return }
+            self.repositionDockSizeHud(near: liveFrame)
+        }
+        resizeOverlay.onResizeEnded = { [weak self] finalFrame in
+            guard let self else { return }
+            self.model.stageManager.saveResizedBarFrame(finalFrame, edge: self.model.stageBarEdge, on: self.stageBarPanel.screen ?? self.currentTargetScreen)
+            self.clampMainWindowInsideCanvas(animated: false)
+            self.repositionDockSizeHud(near: finalFrame)
+            self.isProgrammaticBarMove = false
+        }
+        container.addSubview(resizeOverlay, positioned: .above, relativeTo: hostingView)
+
+        panel.contentView = container
         self.stageBarPanel = panel
         applyStageBarSizeLimits(for: model.stageBarEdge)
+    }
+
+    private func toggleDockSizeHud() {
+        if let hud = dockSizeHudPanel, hud.isVisible {
+            hud.orderOut(nil)
+            return
+        }
+        if !model.isStageBarVisible {
+            showStageBar()
+        }
+        let hud = dockSizeHudPanel ?? makeDockSizeHudPanel()
+        repositionDockSizeHud(near: stageBarPanel.frame)
+        hud.orderFrontRegardless()
+    }
+
+    private func makeDockSizeHudPanel() -> StageBarPanel {
+        let panel = StageBarPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 222),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.worksWhenModal = true
+        panel.level = .floating
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
+        let hosting = NSHostingView(rootView: DockSizeHudView(
+            model: model,
+            stage: model.stageManager,
+            themeStore: model.themeStore,
+            onClose: { [weak self] in self?.dockSizeHudPanel?.orderOut(nil) }
+        ))
+        panel.contentView = hosting
+        panel.setContentSize(hosting.fittingSize)
+        self.dockSizeHudPanel = panel
+        return panel
+    }
+
+    private func repositionDockSizeHud(near barFrame: CGRect) {
+        guard let hud = dockSizeHudPanel else { return }
+        let screen = stageBarPanel.screen ?? currentTargetScreen ?? NSScreen.main ?? NSScreen.screens.first
+        let visible = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1050)
+        if let hosting = hud.contentView {
+            let fit = hosting.fittingSize
+            if fit.width > 100 && fit.height > 100 {
+                hud.setContentSize(fit)
+            }
+        }
+        let hudSize = hud.frame.size
+        let gap: CGFloat = 10
+        var origin: CGPoint
+        switch model.stageBarEdge {
+        case .right:
+            origin = CGPoint(x: barFrame.minX - hudSize.width - gap, y: barFrame.midY - hudSize.height / 2)
+        case .left:
+            origin = CGPoint(x: barFrame.maxX + gap, y: barFrame.midY - hudSize.height / 2)
+        case .top:
+            origin = CGPoint(x: barFrame.midX - hudSize.width / 2, y: barFrame.minY - hudSize.height - gap)
+        case .bottom:
+            origin = CGPoint(x: barFrame.midX - hudSize.width / 2, y: barFrame.maxY + gap)
+        }
+        origin.x = min(visible.maxX - hudSize.width - 8, max(visible.minX + 8, origin.x))
+        origin.y = min(visible.maxY - hudSize.height - 8, max(visible.minY + 8, origin.y))
+        hud.setFrameOrigin(origin)
     }
 
     private func applyStageBarSizeLimits(for edge: StageBarEdge) {
@@ -1914,6 +2519,9 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
         let targetFrame = model.stageManager.stageBarFrame(edge: model.stageBarEdge, on: screen)
         stageBarPanel.setFrame(targetFrame, display: true)
         clampMainWindowInsideCanvas(animated: false)
+        if dockSizeHudPanel?.isVisible == true {
+            repositionDockSizeHud(near: targetFrame)
+        }
         isProgrammaticBarMove = false
     }
 
@@ -1943,6 +2551,8 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
         addItem(dockMenu, "底部", #selector(dockBottom), key: "")
         addItem(dockMenu, "左侧", #selector(dockLeft), key: "")
         addItem(dockMenu, "右侧", #selector(dockRight), key: "")
+        dockMenu.addItem(.separator())
+        addItem(dockMenu, "悬浮滑块调节宽/长…", #selector(toggleDockSizeHudAction), key: "")
         dockItem.submenu = dockMenu
         menu.addItem(dockItem)
 
@@ -2005,6 +2615,9 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
             Task { @MainActor in self?.isProgrammaticBarMove = false }
         }
         stageBarPanel.orderFrontRegardless()
+        if dockSizeHudPanel?.isVisible == true {
+            repositionDockSizeHud(near: targetFrame)
+        }
         clampMainWindowInsideCanvas(animated: true)
         if announce {
             model.showBanner("悬浮栏已停靠到屏幕\(edge.label)")
@@ -2018,6 +2631,7 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
 
     func toggleStageBar() {
         if model.isStageBarVisible {
+            dockSizeHudPanel?.orderOut(nil)
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.16
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -2035,7 +2649,7 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
     }
 
     func showMainWindow() {
-        clampMainWindowInsideCanvas(animated: false)
+        clampMainWindowInsideCanvas(animated: false, onlyIfVisible: false)
         if !mainWindow.isVisible {
             mainWindow.alphaValue = 0
             mainWindow.makeKeyAndOrderFront(nil)
@@ -2053,8 +2667,8 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
         raiseStageBar()
     }
 
-    private func clampMainWindowInsideCanvas(animated: Bool) {
-        guard model.isStageBarVisible else { return }
+    private func clampMainWindowInsideCanvas(animated: Bool, onlyIfVisible: Bool = true) {
+        guard model.isStageBarVisible, (!onlyIfVisible || mainWindow.isVisible) else { return }
         let canvas = model.stageManager.stageCanvasFrame(edge: model.stageBarEdge, on: currentTargetScreen, reserveBar: true)
         var frame = mainWindow.frame
         var changed = false
@@ -2147,6 +2761,7 @@ private final class WorkstationCoordinator: NSObject, NSApplicationDelegate, NSW
 
     @objc func toggleMainWindowAction() { toggleMainWindow() }
     @objc func toggleStageBarAction() { toggleStageBar() }
+    @objc func toggleDockSizeHudAction() { toggleDockSizeHud() }
     @objc func dockTop() { model.stageBarEdge = .top }
     @objc func dockBottom() { model.stageBarEdge = .bottom }
     @objc func dockLeft() { model.stageBarEdge = .left }
