@@ -37,16 +37,27 @@ trap 'exit 143' TERM
 # Auto-detect stable local code-signing identity (e.g. WuyuWorkstationDev or Apple Development)
 # so future updates keep macOS Accessibility permission automatically without re-adding.
 SIGN_IDENTITY="${WUYU_SIGN_IDENTITY:-}"
+SIGN_LABEL=""
 if [ -z "$SIGN_IDENTITY" ]; then
+    valid_identities=$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null || true)
     for candidate in "WuyuWorkstationDev" "Apple Development"; do
-        if /usr/bin/security find-identity -v -p codesigning 2>/dev/null | grep -Fq "$candidate"; then
-            SIGN_IDENTITY="$candidate"
+        matched_line=$(printf '%s\n' "$valid_identities" | grep -F "$candidate" | head -n 1 || true)
+        if [ -n "$matched_line" ]; then
+            SIGN_IDENTITY=$(printf '%s\n' "$matched_line" | awk '{print $2}')
+            SIGN_LABEL=$(printf '%s\n' "$matched_line" | sed -E 's/.*"([^"]+)".*/\1/')
             break
         fi
     done
 fi
 if [ -z "$SIGN_IDENTITY" ]; then
     SIGN_IDENTITY="-"
+    SIGN_LABEL="ad-hoc"
+    if /usr/bin/security find-identity -p codesigning 2>/dev/null | grep -Fq "WuyuWorkstationDev"; then
+        printf '提示：检测到证书 WuyuWorkstationDev，但尚未设为「代码签名：始终信任」，本次暂退回临时签名。\n' >&2
+        printf '请在「钥匙串访问」双击 WuyuWorkstationDev → 信任 → 代码签名 → 始终信任。\n' >&2
+    fi
+elif [ -z "$SIGN_LABEL" ]; then
+    SIGN_LABEL="$SIGN_IDENTITY"
 fi
 
 stage=$(mktemp -d "$build_dir/.stage.XXXXXXXX")
@@ -94,6 +105,7 @@ done
     -o "$staged_app/Contents/MacOS/Bridge"
 /usr/bin/codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$staged_app"
 /usr/bin/codesign --verify --strict "$staged_app"
+req_summary=$(/usr/bin/codesign -d -r - "$staged_app" 2>&1 | grep 'designated =>' || true)
 
 mv "$staged_cli" "$stage/bridge-cli"
 mv "$staged_app" "$stage/$app_name"
@@ -104,4 +116,7 @@ fi
 mv "$stage/$app_name" "$installed_app"
 mv -f "$stage/bridge-cli" "$cli"
 
-printf 'Built & installed (%s): %s\n' "$SIGN_IDENTITY" "$installed_app"
+printf 'Built & installed (%s): %s\n' "$SIGN_LABEL" "$installed_app"
+if [ -n "$req_summary" ]; then
+    printf 'Signing requirement: %s\n' "$req_summary"
+fi

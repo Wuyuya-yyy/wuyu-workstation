@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var themeStore: WorkstationThemeStore
     @ObservedObject var stageManager: WindowStageManager
     @Binding var stageBarEdge: StageBarEdge
+    var onDockGeometryChanged: (() -> Void)?
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.workstationPalette) private var palette
@@ -12,6 +13,10 @@ struct SettingsView: View {
 
     @AppStorage("workstation.codexReasoningEffort") private var codexEffort = "medium"
     @AppStorage("workstation.codexProxyURL") private var codexProxyURL = ""
+    @AppStorage(StageBarMetrics.verticalWidthKey) private var dockVerticalWidth: Double = 88
+    @AppStorage(StageBarMetrics.verticalLengthPercentKey) private var dockVerticalLengthPercent: Double = 76
+    @AppStorage(StageBarMetrics.horizontalHeightKey) private var dockHorizontalHeight: Double = 46
+    @AppStorage(StageBarMetrics.horizontalLengthPercentKey) private var dockHorizontalLengthPercent: Double = 98
     @State private var appPaths: [Client: String] = [:]
     @State private var mcpStatus: MCPHealthStatus = .inspect()
     @State private var bgHexInput = ""
@@ -66,6 +71,7 @@ struct SettingsView: View {
         .onAppear {
             loadCurrentPaths()
             syncHexInputs()
+            syncDockSliders()
             stageManager.refreshStatus()
             mcpStatus = .inspect()
         }
@@ -144,6 +150,54 @@ struct SettingsView: View {
                     .labelsHidden()
                     .pickerStyle(.segmented)
                     .frame(width: 240)
+                }
+
+                divider.padding(.horizontal, 14)
+
+                if stageBarEdge.isVertical {
+                    settingRow("左右悬浮栏宽度（\(Int(dockVerticalWidth.rounded()))px）") {
+                        HStack(spacing: 8) {
+                            Slider(value: $dockVerticalWidth, in: 56...180, step: 2)
+                                .frame(width: 175)
+                                .onChange(of: dockVerticalWidth) { onDockGeometryChanged?() }
+                            Button("重置") {
+                                stageManager.resetBarDimensions()
+                                syncDockSliders()
+                                onDockGeometryChanged?()
+                            }
+                            .buttonStyle(WorkstationButtonStyle(.quiet, compact: true))
+                        }
+                    }
+
+                    divider.padding(.horizontal, 14)
+
+                    settingRow("左右悬浮栏长度（\(Int(dockVerticalLengthPercent.rounded()))% 屏高）") {
+                        Slider(value: $dockVerticalLengthPercent, in: 45...100, step: 1)
+                            .frame(width: 225)
+                            .onChange(of: dockVerticalLengthPercent) { onDockGeometryChanged?() }
+                    }
+                } else {
+                    settingRow("顶底悬浮栏长度（\(Int(dockHorizontalLengthPercent.rounded()))% 屏宽）") {
+                        HStack(spacing: 8) {
+                            Slider(value: $dockHorizontalLengthPercent, in: 55...100, step: 1)
+                                .frame(width: 175)
+                                .onChange(of: dockHorizontalLengthPercent) { onDockGeometryChanged?() }
+                            Button("重置") {
+                                stageManager.resetBarDimensions()
+                                syncDockSliders()
+                                onDockGeometryChanged?()
+                            }
+                            .buttonStyle(WorkstationButtonStyle(.quiet, compact: true))
+                        }
+                    }
+
+                    divider.padding(.horizontal, 14)
+
+                    settingRow("顶底悬浮栏高度（\(Int(dockHorizontalHeight.rounded()))px）") {
+                        Slider(value: $dockHorizontalHeight, in: 40...64, step: 1)
+                            .frame(width: 225)
+                            .onChange(of: dockHorizontalHeight) { onDockGeometryChanged?() }
+                    }
                 }
 
                 divider.padding(.horizontal, 14)
@@ -503,6 +557,14 @@ struct SettingsView: View {
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(ok ? palette.success : palette.quiet)
         }
+    }
+
+    private func syncDockSliders() {
+        let m = StageBarMetrics.forScreen(NSScreen.main)
+        dockVerticalWidth = Double(m.verticalWidth)
+        dockVerticalLengthPercent = Double(StageBarMetrics.savedVerticalLengthPercent())
+        dockHorizontalHeight = Double(m.horizontalHeight)
+        dockHorizontalLengthPercent = Double(StageBarMetrics.savedHorizontalLengthPercent())
     }
 
     private func syncHexInputs() {

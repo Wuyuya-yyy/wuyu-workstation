@@ -59,24 +59,77 @@ enum StageLayout: Equatable, Hashable, Sendable {
 }
 
 struct StageBarMetrics: Equatable, Sendable {
+    static let verticalWidthKey = "workstation.dock.verticalWidth"
+    static let verticalLengthPercentKey = "workstation.dock.verticalLengthPercent"
+    static let horizontalHeightKey = "workstation.dock.horizontalHeight"
+    static let horizontalLengthPercentKey = "workstation.dock.horizontalLengthPercent"
+
+    static let verticalWidthRange: ClosedRange<CGFloat> = 56...180
+    static let verticalLengthPercentRange: ClosedRange<CGFloat> = 45...100
+    static let horizontalHeightRange: ClosedRange<CGFloat> = 40...64
+    static let horizontalLengthPercentRange: ClosedRange<CGFloat> = 55...100
+
     let horizontalHeight: CGFloat
+    let horizontalWidth: CGFloat
     let verticalWidth: CGFloat
     let verticalHeight: CGFloat
     let uiScale: CGFloat
 
-    static func forScreen(_ screen: NSScreen?) -> StageBarMetrics {
+    static func savedVerticalWidth(for screen: NSScreen?, defaults: UserDefaults = .standard) -> CGFloat {
+        let saved = defaults.double(forKey: verticalWidthKey)
+        if saved >= verticalWidthRange.lowerBound {
+            return min(verticalWidthRange.upperBound, CGFloat(saved))
+        }
         let visible = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        // Adapt width/height gracefully from 13" MacBook (~1280-1470pt) up to 1080p/2K/4K monitors (1920-2560pt+)
-        let vWidth = min(92, max(66, floor(visible.width * 0.044)))
-        let hHeight = min(54, max(44, floor(visible.height * 0.046)))
-        let uiScale = min(1.32, max(0.96, vWidth / 66.0))
-        // Keep vertical dock tightly proportioned around its scaled controls (never leaving a giant hollow middle gap)
-        let idealVerticalHeight = round(560 * uiScale)
-        let maxAllowedHeight = max(460, visible.height - 20)
-        let vHeight = min(maxAllowedHeight, max(480, idealVerticalHeight))
+        return min(96, max(72, floor(visible.width * 0.048)))
+    }
+
+    static func savedVerticalLengthPercent(defaults: UserDefaults = .standard) -> CGFloat {
+        let saved = defaults.double(forKey: verticalLengthPercentKey)
+        if saved >= verticalLengthPercentRange.lowerBound {
+            return min(verticalLengthPercentRange.upperBound, CGFloat(saved))
+        }
+        return 76
+    }
+
+    static func savedHorizontalHeight(for screen: NSScreen?, defaults: UserDefaults = .standard) -> CGFloat {
+        let saved = defaults.double(forKey: horizontalHeightKey)
+        if saved >= horizontalHeightRange.lowerBound {
+            return min(horizontalHeightRange.upperBound, CGFloat(saved))
+        }
+        let visible = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+            ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        return min(52, max(44, floor(visible.height * 0.046)))
+    }
+
+    static func savedHorizontalLengthPercent(defaults: UserDefaults = .standard) -> CGFloat {
+        let saved = defaults.double(forKey: horizontalLengthPercentKey)
+        if saved >= horizontalLengthPercentRange.lowerBound {
+            return min(horizontalLengthPercentRange.upperBound, CGFloat(saved))
+        }
+        return 98
+    }
+
+    static func forScreen(_ screen: NSScreen?, defaults: UserDefaults = .standard) -> StageBarMetrics {
+        let visible = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+            ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let m: CGFloat = 6
+        let maxW = max(720, visible.width - m * 2)
+        let maxH = max(420, visible.height - m * 2)
+
+        let vWidth = savedVerticalWidth(for: screen, defaults: defaults)
+        let vPct = savedVerticalLengthPercent(defaults: defaults) / 100.0
+        let vHeight = min(maxH, max(400, floor(maxH * vPct)))
+
+        let hHeight = savedHorizontalHeight(for: screen, defaults: defaults)
+        let hPct = savedHorizontalLengthPercent(defaults: defaults) / 100.0
+        let hWidth = min(maxW, max(720, floor(maxW * hPct)))
+
+        let uiScale = min(1.35, max(0.88, vWidth / 72.0))
         return StageBarMetrics(
             horizontalHeight: hHeight,
+            horizontalWidth: hWidth,
             verticalWidth: vWidth,
             verticalHeight: vHeight,
             uiScale: uiScale
@@ -154,33 +207,64 @@ final class WindowStageManager: ObservableObject {
         switch edge {
         case .top:
             return CGRect(
-                x: visible.minX + m,
+                x: floor(visible.midX - metrics.horizontalWidth / 2),
                 y: visible.maxY - metrics.horizontalHeight - m,
-                width: max(760, visible.width - m * 2),
+                width: metrics.horizontalWidth,
                 height: metrics.horizontalHeight
             )
         case .bottom:
             return CGRect(
-                x: visible.minX + m,
+                x: floor(visible.midX - metrics.horizontalWidth / 2),
                 y: visible.minY + m,
-                width: max(760, visible.width - m * 2),
+                width: metrics.horizontalWidth,
                 height: metrics.horizontalHeight
             )
         case .left:
             return CGRect(
                 x: visible.minX + m,
-                y: visible.midY - metrics.verticalHeight / 2,
+                y: floor(visible.midY - metrics.verticalHeight / 2),
                 width: metrics.verticalWidth,
                 height: metrics.verticalHeight
             )
         case .right:
             return CGRect(
                 x: visible.maxX - metrics.verticalWidth - m,
-                y: visible.midY - metrics.verticalHeight / 2,
+                y: floor(visible.midY - metrics.verticalHeight / 2),
                 width: metrics.verticalWidth,
                 height: metrics.verticalHeight
             )
         }
+    }
+
+    func saveResizedBarFrame(_ frame: CGRect, edge: StageBarEdge, on screen: NSScreen? = nil) {
+        let targetScreen = screen ?? NSScreen.main ?? NSScreen.screens.first
+        guard let visible = targetScreen?.visibleFrame else { return }
+        let m = Self.barMargin
+        let maxW = max(720, visible.width - m * 2)
+        let maxH = max(420, visible.height - m * 2)
+        let defaults = UserDefaults.standard
+
+        if edge.isVertical {
+            let clampedW = min(StageBarMetrics.verticalWidthRange.upperBound, max(StageBarMetrics.verticalWidthRange.lowerBound, round(frame.width)))
+            let pct = min(StageBarMetrics.verticalLengthPercentRange.upperBound, max(StageBarMetrics.verticalLengthPercentRange.lowerBound, round((frame.height / maxH) * 100)))
+            defaults.set(Double(clampedW), forKey: StageBarMetrics.verticalWidthKey)
+            defaults.set(Double(pct), forKey: StageBarMetrics.verticalLengthPercentKey)
+        } else {
+            let clampedH = min(StageBarMetrics.horizontalHeightRange.upperBound, max(StageBarMetrics.horizontalHeightRange.lowerBound, round(frame.height)))
+            let pct = min(StageBarMetrics.horizontalLengthPercentRange.upperBound, max(StageBarMetrics.horizontalLengthPercentRange.lowerBound, round((frame.width / maxW) * 100)))
+            defaults.set(Double(clampedH), forKey: StageBarMetrics.horizontalHeightKey)
+            defaults.set(Double(pct), forKey: StageBarMetrics.horizontalLengthPercentKey)
+        }
+        barMetrics = StageBarMetrics.forScreen(targetScreen)
+    }
+
+    func resetBarDimensions(on screen: NSScreen? = nil) {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: StageBarMetrics.verticalWidthKey)
+        defaults.removeObject(forKey: StageBarMetrics.verticalLengthPercentKey)
+        defaults.removeObject(forKey: StageBarMetrics.horizontalHeightKey)
+        defaults.removeObject(forKey: StageBarMetrics.horizontalLengthPercentKey)
+        barMetrics = StageBarMetrics.forScreen(screen ?? NSScreen.main ?? NSScreen.screens.first)
     }
 
     func stageCanvasFrame(edge: StageBarEdge = .top, on screen: NSScreen? = nil, reserveBar: Bool = true) -> CGRect {
